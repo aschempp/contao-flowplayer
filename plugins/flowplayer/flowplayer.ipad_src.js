@@ -1,7 +1,7 @@
 /**
- * ipad.js 3.2.1. The Flowplayer API
+ * ipad.js 3.2.2. The Flowplayer ipad/iphone fallback.
  *
- * Copyright 2010 Flowplayer Oy
+ * Copyright 2010, 2011 Flowplayer Oy
  * By Thomas Dubois <thomas@flowplayer.org>
  *
  * This file is part of Flowplayer.
@@ -19,8 +19,8 @@
  * You should have received a copy of the GNU General Public License
  * along with Flowplayer.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Date: 2010-08-25 17:40:08 +0000 (Wed, 25 Aug 2010)
- * Revision: 4219
+ * Date: 2011-01-10 07:50:57 -0500 (Mon, 10 Jan 2011)
+ * Revision: 4901
  */
 
 
@@ -49,8 +49,8 @@ $f.addPlugin("ipad", function(options) {
 		baseUrl: 		null,
 		bufferLength: 	3,			// unused
 		connectionProvider: null,	// unused
-		cuepointMultiplier: 1000,	// not yet implemented
-		cuepoints: [],				// not yet implemented
+		cuepointMultiplier: 1000,
+		cuepoints: [],
 		controls: {},				// unused
 		duration: 0,				// not yet implemented
 		extension: '',
@@ -95,13 +95,15 @@ $f.addPlugin("ipad", function(options) {
 				}
 			}
 		}
+		return to;
 	}
 
 	var opts = {
 		simulateiDevice: false,
 		controlsSizeRatio: 1.5,
 		controls: true,
-		debug: false
+		debug: false,
+		validExtensions: /mov|m4v|mp4|avi/gi
 	};
 
 	extend(opts, options);
@@ -150,6 +152,10 @@ $f.addPlugin("ipad", function(options) {
 		previousState = currentState;
 		currentState = state;
 
+		stopPlayTimeTracker();		
+		if ( state == STATE_PLAYING )
+			startPlayTimeTracker();
+
 		log(stateDescription(state));
 	}
 
@@ -162,6 +168,50 @@ $f.addPlugin("ipad", function(options) {
 		// call twice so previous state is unstarted too
 		setState(STATE_UNSTARTED);
 		setState(STATE_UNSTARTED);
+	}
+	
+	/* PLAY TIME TRACKING */
+	var _playTimeTracker = null;
+	
+	function startPlayTimeTracker() {
+		if ( _playTimeTracker )
+			return;
+			
+		console.log("starting tracker");
+		_playTimeTracker = setInterval(onTimeTracked, 100);
+		onTimeTracked();
+	}
+	
+	function stopPlayTimeTracker() {
+		clearInterval(_playTimeTracker);
+		_playTimeTracker = null;
+	}
+	
+	function onTimeTracked() {
+		// cue points handling
+		var currentTime = Math.floor(video.fp_getTime() * 10) * 100;
+		var duration    = Math.floor(video.duration * 10) * 100;
+		var fireTime	= (new Date()).time;
+		// find nearest cuepoint and fire it. Should be moved to avoid closure compilation each time
+		function fireCuePointsIfNeeded(time, cues) {
+			time = time >= 0 ? time : duration - Math.abs(time);
+			for ( var i = 0; i < cues.length; i++ ) {
+				// if cue point fired in the future, reset it
+				if ( cues[i].lastTimeFired > fireTime ) {
+					cues[i].lastTimeFired = -1;
+				} else if ( cues[i].lastTimeFired + 500 > fireTime ) {	// cuepoint was fired less that 500 ms ago, don't do anything
+					continue;
+				} else {
+					if ( time == currentTime || // we got the right tick
+						(currentTime - 500 < time && currentTime > time) ) {	// we missed one	
+						cues[i].lastTimeFired = fireTime;
+						$f.fireEvent(self.id(), 'onCuepoint', activeIndex, cues[i].fnId, cues[i].parameters);
+					}
+				}
+			}
+		}
+		$f.each(self.getCommonClip()._cuepoints	, 		fireCuePointsIfNeeded);
+		$f.each(activePlaylist[activeIndex]._cuepoints, fireCuePointsIfNeeded);		
 	}
 
 	function replay() {
@@ -185,7 +235,7 @@ $f.addPlugin("ipad", function(options) {
 			extend(extendedClip, clip);
 			
 			if ( extendedClip.ipadUrl )
-				url = extendedClip.ipadUrl;
+                url = decodeURIComponent(extendedClip.ipadUrl);
 			else if ( extendedClip.url )
 				url = extendedClip.url;
 
@@ -199,7 +249,6 @@ $f.addPlugin("ipad", function(options) {
 			
 			// remove this
 			delete extendedClip.index;
-			
 			log("fixed clip", extendedClip);
 			
 			return extendedClip;
@@ -238,6 +287,16 @@ $f.addPlugin("ipad", function(options) {
 
 					// replace playlist
 					video.fp_setPlaylist(clip.length !== undefined ? clip : [clip]);
+				}
+				
+				
+				if ( ! opts.validExtensions.test(activePlaylist[activeIndex].extension)) {
+					if ( activePlaylist.length > 1 && activeIndex < (activePlaylist.length - 1) ) {
+						// not the last clip in the playlist
+						log("Not last clip in the playlist, moving to next one");
+						video.fp_play(++activeIndex, false, true);
+					}
+					return;
 				}
 				
 				clip = activePlaylist[activeIndex];
@@ -496,10 +555,35 @@ $f.addPlugin("ipad", function(options) {
 			else
 				video.webkitEnterFullscreen();
 		}
+		
+		video.fp_addCuepoints = function(points, index, fnId) {
+			var clip = index == -1 ? self.getCommonClip() : activePlaylist[index];
+			clip._cuepoints = clip._cuepoints || {};
+			points = points instanceof Array ? points : [points];
+			for ( var i = 0; i < points.length; i++ ) {
+				var time = typeof points[i] == "object" ? (points[i]['time'] || null) : points[i];
+				if ( time == null ) continue;
+				
+				time = Math.floor(time / 100) * 100;
+				
+				var parameters = time;
+				if ( typeof points[i] == "object" ) {
+					parameters = extend({}, points[i], false);
+					if ( parameters['time'] != undefined ) delete parameters['time'];
+					if ( parameters['parameters'] != undefined ) {
+						extend(parameters, parameters['parameters'], false);
+						delete parameters['parameters'];
+					}
+				}				
+				
+				clip._cuepoints[time] = clip._cuepoints[time] || [];
+				clip._cuepoints[time].push({fnId: fnId, lastTimeFired: -1, parameters: parameters});
+			}			
+		}
 
 		// install all other core API with dummy function
 		// core API methods
-		$f.each(("toggleFullscreen,stopBuffering,reset,playFeed,setKeyboardShortcutsEnabled,isKeyboardShortcutsEnabled,addCuepoints,css,animate,showPlugin,hidePlugin,togglePlugin,fadeTo,invoke,loadPlugin").split(","),
+		$f.each(("toggleFullscreen,stopBuffering,reset,playFeed,setKeyboardShortcutsEnabled,isKeyboardShortcutsEnabled,css,animate,showPlugin,hidePlugin,togglePlugin,fadeTo,invoke,loadPlugin").split(","),
 			function() {
 				var name = this;
 
@@ -514,21 +598,8 @@ $f.addPlugin("ipad", function(options) {
 	// Internal func, maps Flowplayer's events
 	function addListeners() {
 
-
-		// Volume*,Mute*,Unmute*,PlaylistReplace,ClipAdd,Error"
-		// Begin*,Start,Pause*,Resume*,Seek*,Stop*,Finish*,LastSecond,Update,BufferStop
-
 		/* CLIP EVENTS MAPPING */
-		/*
-		var onBegin = function(e) {
-			// we are not getting that one on the device ?
-			fireOnBeginIfNeeded(e);
-		};
-		video.addEventListener('loadstart', onBegin, false);
-		
-		
-		*/
-		
+
 		var events = [	'abort',
 						'canplay',
 						'canplaythrough',
@@ -548,7 +619,7 @@ $f.addPlugin("ipad", function(options) {
 						'seeking',
 						'stalled',
 						'suspend',
-						'timeupdate',
+					//	'timeupdate',
 						'volumechange',
 						'waiting'];
 		var eventsLogger = function(e) {
@@ -556,7 +627,7 @@ $f.addPlugin("ipad", function(options) {
 		}
 						
 		for ( var i = 0; i < events.length; i++ )
-			video.addEventListener(events[i], eventsLogger);
+			video.addEventListener(events[i], eventsLogger, false);
 		
 		
 		
@@ -688,7 +759,6 @@ $f.addPlugin("ipad", function(options) {
 			else
 				$f.fireEvent(self.id(), 'onSeek', activeIndex);
 
-
 			log("seek done, currentState", stateDescription(currentState));
 
 			if ( playAfterSeek ) {
@@ -699,10 +769,6 @@ $f.addPlugin("ipad", function(options) {
 		};
 		video.addEventListener('seeked', onSeekDone, false);
 
-
-
-
-
 		/* PLAYER EVENTS MAPPING */
 
 		var onVolumeChange = function(e) {
@@ -710,6 +776,8 @@ $f.addPlugin("ipad", function(options) {
 			$f.fireEvent(self.id(), 'onVolume', video.fp_getVolume());
 		};
 		video.addEventListener('volumechange', onVolumeChange, false);
+		
+	
 	}
 
 	// this is called only on iDevices

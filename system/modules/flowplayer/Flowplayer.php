@@ -196,7 +196,7 @@ class Flowplayer extends System
 		
 		$arrConfig['plugins'] = $this->arrPlugins;
 		
-		return "var " . $this->strId . " = flowplayer('" . $this->strId . "', $strFlash, " . $this->compileConfig($arrConfig) . ");";
+		return "var " . $this->strId . " = flowplayer('" . $this->strId . "', $strFlash, " . $this->compileConfig($arrConfig) . ");\n";
 		
 		return $strBuffer;
 	}
@@ -247,7 +247,14 @@ class Flowplayer extends System
 		if (!is_array($this->arrPlugins[$strName]))
 			return false;
 		
-		unset($this->arrPlugins[$strName]);
+		if ($strName == 'controls')
+		{
+			$this->arrPlugins[$strName] = 'null';
+		}
+		else
+		{
+			unset($this->arrPlugins[$strName]);
+		}
 		
 		return true;
 	}
@@ -298,7 +305,7 @@ class Flowplayer extends System
 				{
 					if (count($varValue))
 					{
-						$arrCompile[] = "'" . $strKey . "': \n" . str_repeat("    ", ($intLevel+1)) . $this->compileConfig($varValue, ($intLevel+1)) . "\n" . str_repeat("    ", $intLevel);
+						$arrCompile[] = "'" . $strKey . "': \n" . str_repeat("    ", ($intLevel+1)) . $this->compileConfig($varValue, ($intLevel+1)) . str_repeat("    ", $intLevel);
 					}
 					else
 					{
@@ -348,7 +355,7 @@ class Flowplayer extends System
 		else
 		{
 			// Boolean strings
-			if ($varValue == 'true' || $varValue == 'false')
+			if ($varValue == 'true' || $varValue == 'false' || $varValue == 'null')
 			{
 				return $varValue;
 			}
