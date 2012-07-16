@@ -24,7 +24,6 @@
  * @copyright  Andreas Schempp 2010
  * @author     Andreas Schempp <andreas@schempp.ch>
  * @license    http://opensource.org/licenses/lgpl-3.0.html
- * @version    $Id$
  */
 
 
@@ -165,19 +164,28 @@ class Flowplayer extends System
 				return $this->arrConfig[$strKey];
 		}
 	}
-	
-	
+
+
 	/**
 	 * Generate Javascript
-	 * @return string
+	 *
+	 * @param array $arrConfig	Configuration array, if you want to configure some plugins use enablePlugins() function!
+	 * @param array $arrFlash	flash-vars config array
+	 * @return string			javascript function to initialize the player
 	 */
-	public function generate(array $arrConfig=null, array $arrFlash=null)
+	public function generate(array $arrConfig=NULL, array $arrFlash=NULL)
 	{
 		if (!is_array($arrConfig))
 		{
 			$arrConfig = $this->arrConfig;
 		}
-		
+
+		// add baseUrl to have a behaviour like <base href="...">
+		if(!isset($arrConfig['clip']['baseUrl']))
+		{
+			$arrConfig['clip']['baseUrl'] = $this->Environment->base;
+		}
+
 		// Allow flash player configuration
 		if (is_null($arrFlash))
 		{
@@ -197,8 +205,6 @@ class Flowplayer extends System
 		$arrConfig['plugins'] = $this->arrPlugins;
 		
 		return "var " . $this->strId . " = flowplayer('" . $this->strId . "', $strFlash, " . $this->compileConfig($arrConfig) . ");\n";
-		
-		return $strBuffer;
 	}
 	
 	
@@ -209,17 +215,20 @@ class Flowplayer extends System
 	public function injectJavascript()
 	{
 		$GLOBALS['TL_JAVASCRIPT'][] = $this->strPluginFolder . '/flowplayer.js';
+		return $this;
 	}
-	
-	
+
+
 	/**
 	 * Enable a flowplayer plugin
-	 * @param  string
-	 * @param  array
-	 * @param  bool
-	 * @return bool
+	 *
+	 * @param $strName				The name of the plugin
+	 * @param array $arrConfig		Configuration array for this plugin
+	 * @param bool $blnMergeConfig	Merge the configuration with an existing one
+	 * @param  string				an alternate path to the swf file
+	 * @return Flowplayer
 	 */
-	public function enablePlugin($strName, array $arrConfig=array(), $blnMergeConfig=false, $strPluginFile=null)
+	public function enablePlugin($strName, array $arrConfig=array(), $blnMergeConfig=false, $strPluginFile=NULL)
 	{
 		if (is_null($strPluginFile))
 		{
@@ -239,9 +248,15 @@ class Flowplayer extends System
 		
 		$this->arrPlugins[$strName] = $arrConfig;
 		
-		return true;
+		return $this;
 	}
-	
+
+
+	/**
+	 * Disable a plugin
+	 * @param $strName	The plugins name
+	 * @return Flowplayer
+	 */
 	public function disablePlugin($strName)
 	{
 		if (!is_array($this->arrPlugins[$strName]))
@@ -256,7 +271,7 @@ class Flowplayer extends System
 			unset($this->arrPlugins[$strName]);
 		}
 		
-		return true;
+		return $this;
 	}
 	
 	
